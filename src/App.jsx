@@ -104,19 +104,17 @@ export default function App() {
   const popupRef = useRef(null);
   const dragMode = useRef(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await window.storage.get("timetable_data");
-        if (r) { const d = JSON.parse(r.value); setWeeks(d.weeks || {}); if (d.categories) setCategories(d.categories); }
-      } catch {}
-    })();
-  }, []);
+ useEffect(() => {
+  try {
+    const raw = localStorage.getItem("timetable_data");
+    if (raw) { const d = JSON.parse(raw); setWeeks(d.weeks || {}); if (d.categories) setCategories(d.categories); }
+  } catch {}
+}, []);
 
-  const save = useCallback(async (nw, nc) => {
-    try { await window.storage.set("timetable_data", JSON.stringify({ weeks: nw, categories: nc })); } catch {}
-  }, []);
-
+const save = useCallback((nw, nc) => {
+  try { localStorage.setItem("timetable_data", JSON.stringify({ weeks: nw, categories: nc })); } catch {}
+}, []);
+  
   const grid = weeks[currentWeek] || EMPTY_GRID();
 
   const midSlots = {};
