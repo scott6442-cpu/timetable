@@ -8,6 +8,8 @@ const SLOTS = Array.from({ length: 32 }, (_, i) => {
   return `${h}:${m}`;
 });
 
+const PRESET_COLORS = ["#6366f1","#8b5cf6","#ec4899","#ef4444","#f97316","#f59e0b","#eab308","#84cc16","#10b981","#06b6d4","#3b82f6","#e879f9"];
+
 const DEFAULT_CATEGORIES = [
   { id: "sleep", label: "수면 😴", color: "#6366f1" },
   { id: "meal", label: "식사 🍽️", color: "#f59e0b" },
@@ -42,6 +44,44 @@ const getWeekLabel = (key) => {
   return `${y}년 ${fmt(mon)} ~ ${fmt(sun)}`;
 };
 
+// 이모지 추천: API 없이 키워드 기반으로 즉시 반환
+const EMOJI_MAP = [
+  { keys: ["수면","잠","취침","낮잠","sleep"], emojis: ["😴","🛌","💤","🌙","⭐"] },
+  { keys: ["식사","밥","점심","저녁","아침","먹","음식","식당","meal","eat"], emojis: ["🍽️","🍱","🥗","🍜","🥘"] },
+  { keys: ["수업","학교","강의","공부","학습","study","class","school"], emojis: ["📚","🏫","✏️","📖","🎓"] },
+  { keys: ["헬스","운동","gym","workout","피트니스","트레이닝"], emojis: ["💪","🏋️","🤸","🏃","⚡"] },
+  { keys: ["테니스","tennis","라켓"], emojis: ["🎾","🏸","🎯","🏆","⚡"] },
+  { keys: ["이동","출퇴근","통학","지하철","버스","교통","drive","transit"], emojis: ["🚇","🚌","🚗","🛵","🚶"] },
+  { keys: ["독서","책","읽","read","book"], emojis: ["📖","📚","🔖","📝","☕"] },
+  { keys: ["회의","미팅","meeting"], emojis: ["💼","🤝","📊","🗣️","📋"] },
+  { keys: ["산책","걷기","walk","hiking","등산"], emojis: ["🚶","🌿","🏞️","👟","🌄"] },
+  { keys: ["쇼핑","마트","shopping"], emojis: ["🛒","🛍️","💳","🏪","📦"] },
+  { keys: ["청소","집안일","housework","clean"], emojis: ["🧹","🧽","🪣","✨","🏠"] },
+  { keys: ["요리","cooking","chef"], emojis: ["👨‍🍳","🍳","🥄","🔪","🫕"] },
+  { keys: ["게임","gaming","play"], emojis: ["🎮","🕹️","👾","🎲","⚔️"] },
+  { keys: ["영화","드라마","movie","video","유튜브"], emojis: ["🎬","🍿","📺","🎥","🎞️"] },
+  { keys: ["음악","노래","악기","music","guitar","piano"], emojis: ["🎵","🎸","🎹","🎤","🎧"] },
+  { keys: ["친구","약속","만남","사람","friend"], emojis: ["👫","🤝","🥳","💬","🎉"] },
+  { keys: ["병원","의료","건강","health","hospital"], emojis: ["🏥","💊","🩺","❤️‍🩹","🩹"] },
+  { keys: ["자유","휴식","rest","free","쉬"], emojis: ["✨","😌","☕","🌈","🌸"] },
+  { keys: ["업무","일","work","직장","회사"], emojis: ["💻","📊","🖥️","📁","⌨️"] },
+  { keys: ["수영","swim","pool","수영장"], emojis: ["🏊","🌊","💦","🩱","🥽"] },
+  { keys: ["자전거","bike","cycling"], emojis: ["🚴","🚵","🏅","💨","🛞"] },
+  { keys: ["명상","yoga","요가","스트레칭"], emojis: ["🧘","🌿","☮️","💆","🌅"] },
+  { keys: ["과제","homework","숙제","report","레포트"], emojis: ["📝","📋","✏️","📐","🖊️"] },
+  { keys: ["강아지","고양이","pet","반려","동물"], emojis: ["🐶","🐱","🐾","🦮","🐕"] },
+];
+
+function getEmojiSuggestions(label) {
+  if (!label.trim()) return [];
+  const lower = label.toLowerCase();
+  for (const entry of EMOJI_MAP) {
+    if (entry.keys.some(k => lower.includes(k))) return entry.emojis;
+  }
+  // 기본 추천
+  return ["📌","⭐","🔵","🟢","🟡"];
+}
+
 export default function App() {
   const [weeks, setWeeks] = useState({});
   const [currentWeek, setCurrentWeek] = useState(getWeekKey(new Date()));
@@ -51,8 +91,11 @@ export default function App() {
   const [dragging, setDragging] = useState(false);
   const [dragCat, setDragCat] = useState(null);
   const [showCatModal, setShowCatModal] = useState(false);
+  const [editCat, setEditCat] = useState(null);
   const [newCatLabel, setNewCatLabel] = useState("");
   const [newCatColor, setNewCatColor] = useState("#e879f9");
+  const [emojiSuggestions, setEmojiSuggestions] = useState([]);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [aiPanel, setAiPanel] = useState(false);
   const [aiMsg, setAiMsg] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -61,19 +104,35 @@ export default function App() {
   const popupRef = useRef(null);
   const dragMode = useRef(null);
 
-  // ✅ 데이터 저장소: localStorage (고정 URL 배포용)
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("timetable_data");
-      if (raw) { const d = JSON.parse(raw); setWeeks(d.weeks || {}); if (d.categories) setCategories(d.categories); }
-    } catch {}
+    (async () => {
+      try {
+        const r = await window.storage.get("timetable_data");
+        if (r) { const d = JSON.parse(r.value); setWeeks(d.weeks || {}); if (d.categories) setCategories(d.categories); }
+      } catch {}
+    })();
   }, []);
 
-  const save = useCallback((newWeeks, newCats) => {
-    try { localStorage.setItem("timetable_data", JSON.stringify({ weeks: newWeeks, categories: newCats })); } catch {}
+  const save = useCallback(async (nw, nc) => {
+    try { await window.storage.set("timetable_data", JSON.stringify({ weeks: nw, categories: nc })); } catch {}
   }, []);
 
   const grid = weeks[currentWeek] || EMPTY_GRID();
+
+  const midSlots = {};
+  DAY_KEYS.forEach(day => {
+    midSlots[day] = new Set();
+    let i = 0;
+    while (i < SLOTS.length) {
+      const cat = grid[day]?.[SLOTS[i]]?.cat;
+      if (cat) {
+        let j = i;
+        while (j < SLOTS.length && grid[day]?.[SLOTS[j]]?.cat === cat) j++;
+        midSlots[day].add(SLOTS[Math.floor((i + j - 1) / 2)]);
+        i = j;
+      } else i++;
+    }
+  });
 
   const updateCell = (day, slot, cat) => {
     const g = JSON.parse(JSON.stringify(grid));
@@ -92,7 +151,7 @@ export default function App() {
     setWeeks(nw); save(nw, categories);
   };
 
-  const handleCellMouseDown = (day, slot, e) => {
+  const handleCellMouseDown = (day, slot) => {
     if (popupInfo) { setPopupInfo(null); return; }
     if (mode === "check") { toggleDone(day, slot); return; }
     const cur = grid[day]?.[slot]?.cat;
@@ -126,12 +185,47 @@ export default function App() {
     return () => document.removeEventListener("mousedown", handler);
   }, [popupInfo]);
 
-  const addCategory = () => {
+  const openAddModal = () => {
+    setEditCat(null); setNewCatLabel(""); setNewCatColor("#e879f9");
+    setEmojiSuggestions([]); setShowDeleteConfirm(false); setShowCatModal(true);
+  };
+
+  const openEditModal = (c) => {
+    setEditCat(c); setNewCatLabel(c.label); setNewCatColor(c.color);
+    setEmojiSuggestions(getEmojiSuggestions(c.label)); setShowDeleteConfirm(false); setShowCatModal(true);
+  };
+
+  const handleLabelChange = (val) => {
+    setNewCatLabel(val);
+    setEmojiSuggestions(getEmojiSuggestions(val));
+  };
+
+  const appendEmoji = (em) => {
+    const base = newCatLabel.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, "").trim();
+    setNewCatLabel(`${base} ${em}`.trim());
+  };
+
+  const saveCategory = () => {
     if (!newCatLabel.trim()) return;
-    const nc = { id: `cat_${Date.now()}`, label: newCatLabel, color: newCatColor };
-    const updated = [...categories, nc];
-    setCategories(updated); save(weeks, updated);
-    setNewCatLabel(""); setNewCatColor("#e879f9"); setShowCatModal(false);
+    let updated;
+    if (editCat) {
+      updated = categories.map(c => c.id === editCat.id ? { ...c, label: newCatLabel, color: newCatColor } : c);
+    } else {
+      updated = [...categories, { id: `cat_${Date.now()}`, label: newCatLabel, color: newCatColor }];
+    }
+    setCategories(updated); save(weeks, updated); setShowCatModal(false);
+  };
+
+  const deleteCategory = () => {
+    const updated = categories.filter(c => c.id !== editCat.id);
+    // 시간표에서 해당 카테고리 제거
+    const nw = JSON.parse(JSON.stringify(weeks));
+    Object.keys(nw).forEach(wk => DAY_KEYS.forEach(d => SLOTS.forEach(s => {
+      if (nw[wk][d]?.[s]?.cat === editCat.id) nw[wk][d][s].cat = null;
+    })));
+    setCategories(updated); setWeeks(nw); save(nw, updated);
+    if (selectedCat === editCat.id) setSelectedCat(updated[0]?.id || null);
+    setShowCatModal(false); setShowDeleteConfirm(false);
   };
 
   const createNewWeek = () => {
@@ -139,20 +233,19 @@ export default function App() {
     setShowWeekList(false);
   };
 
-  const copyToNewWeek = (fromKey) => {
-    const next = getNextWeekKey(currentWeek);
-    const nw = { ...weeks, [next]: JSON.parse(JSON.stringify(weeks[fromKey] || EMPTY_GRID())) };
-    DAY_KEYS.forEach(d => SLOTS.forEach(s => { if (nw[next][d]?.[s]) nw[next][d][s].done = false; }));
-    setWeeks(nw); setCurrentWeek(next); save(nw, categories); setShowWeekList(false);
-  };
-
   const getNextWeekKey = (key) => {
     const [y, w] = key.split("-W");
     const jan1 = new Date(Number(y), 0, 1);
     const days = (Number(w) - 1) * 7;
     const mon = new Date(jan1.getTime() + (days - (jan1.getDay() || 7) + 1) * 86400000);
-    const nextMon = new Date(mon.getTime() + 7 * 86400000);
-    return getWeekKey(nextMon);
+    return getWeekKey(new Date(mon.getTime() + 7 * 86400000));
+  };
+
+  const copyToNewWeek = (fromKey) => {
+    const next = getNextWeekKey(currentWeek);
+    const nw = { ...weeks, [next]: JSON.parse(JSON.stringify(weeks[fromKey] || EMPTY_GRID())) };
+    DAY_KEYS.forEach(d => SLOTS.forEach(s => { if (nw[next][d]?.[s]) nw[next][d][s].done = false; }));
+    setWeeks(nw); setCurrentWeek(next); save(nw, categories); setShowWeekList(false);
   };
 
   const askAI = async () => {
@@ -164,11 +257,10 @@ export default function App() {
       const cell = grid[d]?.[s];
       if (cell?.cat) { const c = categories.find(x => x.id === cell.cat); if (c) { summary[c.label] += 0.5; if (cell.done) doneCount[c.label] += 0.5; } }
     }));
-    const prompt = `당신은 시간 관리 코치입니다. 사용자의 주간 시간표를 분석해주세요.\n\n계획된 시간(시간):\n${Object.entries(summary).map(([k, v]) => `- ${k}: ${v}시간`).join("\n")}\n\n실제 수행한 시간(시간):\n${Object.entries(doneCount).map(([k, v]) => `- ${k}: ${v}시간`).join("\n")}\n\n위 데이터를 바탕으로:\n1. 이번 주 시간 배분에 대한 간단한 평가\n2. 계획 대비 실행률\n3. 개선 제안 1~2가지\n를 친근하고 간결하게 한국어로 알려주세요. 이모지를 적절히 사용해주세요.`;
+    const prompt = `당신은 시간 관리 코치입니다.\n\n계획된 시간:\n${Object.entries(summary).map(([k,v]) => `- ${k}: ${v}시간`).join("\n")}\n\n실제 수행:\n${Object.entries(doneCount).map(([k,v]) => `- ${k}: ${v}시간`).join("\n")}\n\n1. 시간 배분 평가\n2. 계획 대비 실행률\n3. 개선 제안 1~2가지\n를 친근하고 간결하게 한국어로 알려주세요. 이모지 사용해주세요.`;
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
       });
       const data = await res.json();
@@ -185,6 +277,7 @@ export default function App() {
 
   return (
     <div style={{ fontFamily: "'Segoe UI', sans-serif", background: "#0f172a", minHeight: "100vh", color: "#e2e8f0", userSelect: "none" }}>
+      {/* Header */}
       <div style={{ background: "#1e293b", padding: "12px 16px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", borderBottom: "1px solid #334155" }}>
         <span style={{ fontSize: 22, fontWeight: 700, color: "#f8fafc" }}>📅 주간 시간표</span>
         <button onClick={() => setShowWeekList(!showWeekList)} style={{ background: "#334155", border: "none", color: "#94a3b8", padding: "6px 12px", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>
@@ -206,7 +299,7 @@ export default function App() {
           <button onClick={createNewWeek} style={{ width: "100%", background: "#6366f1", border: "none", color: "#fff", padding: "8px", borderRadius: 8, cursor: "pointer", marginBottom: 8, fontSize: 13 }}>+ 이번 주 새로 시작</button>
           {weekKeys.length > 0 && <button onClick={() => copyToNewWeek(weekKeys[0])} style={{ width: "100%", background: "#334155", border: "none", color: "#e2e8f0", padding: "8px", borderRadius: 8, cursor: "pointer", marginBottom: 8, fontSize: 13 }}>📋 지난 주 복사해서 다음 주 생성</button>}
           {weekKeys.map(k => (
-            <div key={k} onClick={() => { setCurrentWeek(k); setShowWeekList(false); }} style={{ padding: "8px 10px", borderRadius: 8, cursor: "pointer", background: k === currentWeek ? "#334155" : "transparent", fontSize: 13, color: "#e2e8f0" }}>
+            <div key={k} onClick={() => { setCurrentWeek(k); setShowWeekList(false); }} style={{ padding: "8px 10px", borderRadius: 8, cursor: "pointer", background: k === currentWeek ? "#334155" : "transparent", fontSize: 13 }}>
               {getWeekLabel(k)} {k === currentWeek && "◀"}
             </div>
           ))}
@@ -230,25 +323,33 @@ export default function App() {
             <span style={{ fontWeight: 600, color: "#a5b4fc" }}>🤖 AI 시간표 분석</span>
             <button onClick={() => setAiPanel(false)} style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", fontSize: 18 }}>×</button>
           </div>
-          {aiLoading ? <div style={{ color: "#94a3b8", fontSize: 13 }}>분석 중... ⏳</div> : <div style={{ fontSize: 13, lineHeight: 1.7, color: "#e2e8f0", whiteSpace: "pre-wrap" }}>{aiMsg}</div>}
+          {aiLoading ? <div style={{ color: "#94a3b8", fontSize: 13 }}>분석 중... ⏳</div> : <div style={{ fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{aiMsg}</div>}
           <button onClick={askAI} style={{ marginTop: 10, background: "#6366f1", border: "none", color: "#fff", padding: "6px 14px", borderRadius: 8, cursor: "pointer", fontSize: 12 }}>🔄 다시 분석</button>
         </div>
       )}
 
+      {/* Category bar */}
       <div style={{ background: "#1e293b", padding: "8px 16px", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", borderBottom: "1px solid #334155" }}>
         {categories.map(c => (
-          <div key={c.id} onClick={() => { setSelectedCat(c.id); setMode("edit"); }}
-            style={{ padding: "4px 10px", borderRadius: 99, cursor: "pointer", fontSize: 12, background: selectedCat === c.id ? c.color : "#334155", color: selectedCat === c.id ? "#fff" : "#94a3b8", border: `2px solid ${selectedCat === c.id ? c.color : "transparent"}`, transition: "all 0.15s" }}>
-            {c.label}
+          <div key={c.id} style={{ display: "flex", alignItems: "center" }}>
+            <div onClick={() => { setSelectedCat(c.id); setMode("edit"); }}
+              style={{ padding: "4px 10px", borderRadius: "99px 0 0 99px", cursor: "pointer", fontSize: 12, background: selectedCat === c.id ? c.color : "#334155", color: selectedCat === c.id ? "#fff" : "#94a3b8", border: `2px solid ${selectedCat === c.id ? c.color : "transparent"}`, borderRight: "none", transition: "all 0.15s" }}>
+              {c.label}
+            </div>
+            <div onClick={() => openEditModal(c)}
+              style={{ padding: "4px 6px", borderRadius: "0 99px 99px 0", cursor: "pointer", fontSize: 10, background: selectedCat === c.id ? c.color : "#2d3f55", color: selectedCat === c.id ? "#fff" : "#64748b", border: `2px solid ${selectedCat === c.id ? c.color : "transparent"}`, borderLeft: "1px solid #0003", transition: "all 0.15s" }}>
+              ✏️
+            </div>
           </div>
         ))}
-        <button onClick={() => setShowCatModal(true)} style={{ background: "#334155", border: "1px dashed #475569", color: "#94a3b8", padding: "4px 10px", borderRadius: 99, cursor: "pointer", fontSize: 12 }}>+ 추가</button>
+        <button onClick={openAddModal} style={{ background: "#334155", border: "1px dashed #475569", color: "#94a3b8", padding: "4px 10px", borderRadius: 99, cursor: "pointer", fontSize: 12 }}>+ 추가</button>
         <div onClick={() => { setSelectedCat(null); setMode("edit"); }}
           style={{ padding: "4px 10px", borderRadius: 99, cursor: "pointer", fontSize: 12, background: selectedCat === null ? "#ef4444" : "#334155", color: selectedCat === null ? "#fff" : "#94a3b8", border: `2px solid ${selectedCat === null ? "#ef4444" : "transparent"}` }}>
           🗑️ 지우기
         </div>
       </div>
 
+      {/* Grid */}
       <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: "calc(100vh - 200px)" }}>
         <div style={{ display: "grid", gridTemplateColumns: `52px repeat(7, minmax(60px, 1fr))`, minWidth: 520 }}>
           <div style={{ background: "#0f172a", position: "sticky", top: 0, zIndex: 10 }} />
@@ -264,13 +365,21 @@ export default function App() {
                 const cell = grid[day]?.[slot] || { cat: null, done: false };
                 const c = cell.cat ? catMap[cell.cat] : null;
                 const isDone = cell.done;
+                const isMid = midSlots[day]?.has(slot);
                 return (
                   <div key={`${day}-${slot}`}
-                    onMouseDown={e => handleCellMouseDown(day, slot, e)}
+                    onMouseDown={() => handleCellMouseDown(day, slot)}
                     onMouseEnter={() => handleCellMouseEnter(day, slot)}
                     onClick={e => handleCellClick(day, slot, e)}
                     style={{ height: 18, background: c ? c.color : "#1e293b", cursor: "pointer", borderBottom: si % 2 === 1 ? "1px solid #334155" : "none", borderRight: "1px solid #334155", position: "relative", opacity: isDone ? 0.5 : 1, boxSizing: "border-box" }}>
-                    {isDone && c && <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "#fff" }}>✓</div>}
+                    {isMid && c && (
+                      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#fff", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", pointerEvents: "none", textShadow: "0 1px 2px #0006" }}>
+                        {isDone ? "✓ " : ""}{c.label}
+                      </div>
+                    )}
+                    {!isMid && isDone && c && (
+                      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "#fff" }}>✓</div>
+                    )}
                   </div>
                 );
               })}
@@ -279,6 +388,7 @@ export default function App() {
         </div>
       </div>
 
+      {/* Popup */}
       {popupInfo && (
         <div ref={popupRef} style={{ position: "fixed", left: Math.min(popupInfo.x, window.innerWidth - 200), top: Math.min(popupInfo.y + 4, window.innerHeight - 300), zIndex: 200, background: "#1e293b", border: "1px solid #334155", borderRadius: 10, padding: 10, boxShadow: "0 8px 32px #0009", minWidth: 180 }}>
           <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>{DAYS[DAY_KEYS.indexOf(popupInfo.day)]}요일 {popupInfo.slot}</div>
@@ -295,18 +405,60 @@ export default function App() {
         </div>
       )}
 
+      {/* Category Modal */}
       {showCatModal && (
         <div style={{ position: "fixed", inset: 0, background: "#000a", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 300 }}>
-          <div style={{ background: "#1e293b", borderRadius: 14, padding: 24, minWidth: 280, boxShadow: "0 8px 32px #000c" }}>
-            <div style={{ fontWeight: 700, marginBottom: 16 }}>새 카테고리 추가</div>
-            <input value={newCatLabel} onChange={e => setNewCatLabel(e.target.value)} placeholder="이름 (예: 독서 📖)" style={{ width: "100%", background: "#334155", border: "1px solid #475569", color: "#e2e8f0", padding: "8px 12px", borderRadius: 8, marginBottom: 10, fontSize: 14, boxSizing: "border-box" }} />
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-              <span style={{ fontSize: 13, color: "#94a3b8" }}>색상:</span>
-              <input type="color" value={newCatColor} onChange={e => setNewCatColor(e.target.value)} style={{ width: 40, height: 32, border: "none", borderRadius: 6, cursor: "pointer" }} />
+          <div style={{ background: "#1e293b", borderRadius: 14, padding: 24, minWidth: 300, boxShadow: "0 8px 32px #000c" }}>
+            <div style={{ fontWeight: 700, marginBottom: 16, fontSize: 16 }}>{editCat ? "카테고리 편집" : "새 카테고리 추가"}</div>
+
+            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>이름</div>
+            <input value={newCatLabel} onChange={e => handleLabelChange(e.target.value)} placeholder="예: 이동시간"
+              style={{ width: "100%", background: "#334155", border: "1px solid #475569", color: "#e2e8f0", padding: "8px 12px", borderRadius: 8, marginBottom: 10, fontSize: 14, boxSizing: "border-box" }} />
+
+            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>이모지 추천</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 14, minHeight: 36, alignItems: "center" }}>
+              {emojiSuggestions.length > 0 ? emojiSuggestions.map((em, i) => (
+                <div key={i} onClick={() => appendEmoji(em)}
+                  style={{ fontSize: 22, cursor: "pointer", padding: "2px 6px", borderRadius: 8, background: "#334155" }}>
+                  {em}
+                </div>
+              )) : <span style={{ fontSize: 12, color: "#475569" }}>이름을 입력하면 추천이 나와요</span>}
             </div>
+
+            <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 8 }}>색상</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+              {PRESET_COLORS.map(col => (
+                <div key={col} onClick={() => setNewCatColor(col)}
+                  style={{ width: 28, height: 28, borderRadius: 99, background: col, cursor: "pointer", border: newCatColor === col ? "3px solid #fff" : "3px solid transparent", boxSizing: "border-box" }} />
+              ))}
+              <label style={{ width: 28, height: 28, borderRadius: 99, background: "conic-gradient(red,yellow,lime,cyan,blue,magenta,red)", cursor: "pointer", border: "2px solid #475569", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                <input type="color" value={newCatColor} onChange={e => setNewCatColor(e.target.value)} style={{ opacity: 0, width: 1, height: 1 }} />
+              </label>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+              <div style={{ width: 20, height: 20, borderRadius: 6, background: newCatColor }} />
+              <span style={{ fontSize: 13, color: "#94a3b8" }}>{newCatColor}</span>
+            </div>
+
+            {/* 삭제 확인 */}
+            {showDeleteConfirm ? (
+              <div style={{ background: "#2d1a1a", border: "1px solid #ef4444", borderRadius: 10, padding: 12, marginBottom: 12 }}>
+                <div style={{ fontSize: 13, color: "#fca5a5", marginBottom: 10 }}>정말 삭제할까요? 시간표에서도 모두 제거됩니다.</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={deleteCategory} style={{ flex: 1, background: "#ef4444", border: "none", color: "#fff", padding: "8px", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>삭제</button>
+                  <button onClick={() => setShowDeleteConfirm(false)} style={{ flex: 1, background: "#334155", border: "none", color: "#e2e8f0", padding: "8px", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>취소</button>
+                </div>
+              </div>
+            ) : null}
+
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={addCategory} style={{ flex: 1, background: "#6366f1", border: "none", color: "#fff", padding: "10px", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>추가</button>
-              <button onClick={() => setShowCatModal(false)} style={{ flex: 1, background: "#334155", border: "none", color: "#e2e8f0", padding: "10px", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>취소</button>
+              <button onClick={saveCategory} style={{ flex: 1, background: "#6366f1", border: "none", color: "#fff", padding: "10px", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>
+                {editCat ? "저장" : "추가"}
+              </button>
+              {editCat && !showDeleteConfirm && (
+                <button onClick={() => setShowDeleteConfirm(true)} style={{ background: "#334155", border: "1px solid #ef4444", color: "#ef4444", padding: "10px 14px", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>🗑️</button>
+              )}
+              <button onClick={() => { setShowCatModal(false); setShowDeleteConfirm(false); }} style={{ flex: 1, background: "#334155", border: "none", color: "#e2e8f0", padding: "10px", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>취소</button>
             </div>
           </div>
         </div>
